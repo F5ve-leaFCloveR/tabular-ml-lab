@@ -46,5 +46,17 @@ curl -X POST http://localhost:8000/predict \
 python scripts/dashboard.py
 ```
 
+## UI Walkthrough
+1. Dataset: choose built-in/OpenML/CSV, select target, preview.
+![Dataset](docs/screenshots/01-dataset.png)
+2. EDA: summary stats, distributions, relationships.
+![EDA](docs/screenshots/02-eda.png)
+3. Transform: drop columns, handle missing values, run custom pandas.
+![Transform](docs/screenshots/03-transform.png)
+4. Model: pick algorithm, set hyperparameters, optional grid search.
+![Model](docs/screenshots/04-model.png)
+5. Results: metrics, plots, saved run and API sample.
+![Results](docs/screenshots/05-results.png)
+
 ## License
 MIT
