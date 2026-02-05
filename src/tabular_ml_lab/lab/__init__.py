@@ -5,5 +5,7 @@ __all__ = [
     "modeling",
     "torch_trainer",
     "metrics",
+    "experiments",
+    "serving",
     "utils",
 ]

@@ -21,6 +21,8 @@ class TorchResult:
     y_true: np.ndarray
     y_pred: np.ndarray
     y_proba: np.ndarray
+    checkpoint: Dict[str, Any]
+    preprocessor: Any
 
 
 def _build_loader(X: np.ndarray, y: np.ndarray, batch_size: int, shuffle: bool) -> DataLoader:
@@ -112,7 +114,8 @@ def train_and_eval_binary(
     if y.nunique() > 2:
         raise ValueError("PyTorch MLP supports only binary classification in this UI.")
 
-    y_encoded = (y == y.unique()[1]).astype(int).to_numpy()
+    classes = list(y.unique())
+    y_encoded = (y == classes[1]).astype(int).to_numpy()
 
     X_train, X_test, y_train, y_test = train_test_split(
         X,
@@ -163,10 +166,21 @@ def train_and_eval_binary(
     metrics = classification_metrics(y_test, preds, probs)
     metrics.update(meta)
 
+    checkpoint = {
+        "model_state": model.state_dict(),
+        "input_dim": X_train_np.shape[1],
+        "hidden_layers": params["hidden_layers"],
+        "dropout": params["dropout"],
+        "positive_label": classes[1],
+        "negative_label": classes[0],
+    }
+
     return TorchResult(
         model=model,
         metrics=metrics,
         y_true=y_test,
         y_pred=preds,
         y_proba=probs,
+        checkpoint=checkpoint,
+        preprocessor=preprocessor,
     )

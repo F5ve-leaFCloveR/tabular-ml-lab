@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any, Dict
 
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
-from sklearn.model_selection import GridSearchCV, train_test_split
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import LabelEncoder
-from sklearn.utils.multiclass import type_of_target
-from sklearn.linear_model import LogisticRegression, LinearRegression
+from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.ensemble import (
     GradientBoostingClassifier,
     GradientBoostingRegressor,
     RandomForestClassifier,
     RandomForestRegressor,
 )
+from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import LabelEncoder
+from sklearn.utils.multiclass import type_of_target
 
 from tabular_ml_lab.lab.metrics import classification_metrics, regression_metrics
 from tabular_ml_lab.preprocess import build_preprocessor
@@ -30,6 +30,7 @@ class TrainResult:
     y_pred: np.ndarray
     y_proba: np.ndarray | None
     feature_names: list[str]
+    best_params: Dict[str, Any] | None
 
 
 def _get_feature_names(preprocessor: ColumnTransformer) -> list[str]:
@@ -110,6 +111,7 @@ def train_sklearn(
             y_train = label_encoder.fit_transform(y_train)
             y_test = label_encoder.transform(y_test)
 
+    best_params = None
     if grid:
         prefixed = {f"model__{k}": v for k, v in grid.items()}
         search = GridSearchCV(
@@ -121,6 +123,7 @@ def train_sklearn(
         )
         search.fit(X_train, y_train)
         model = search.best_estimator_
+        best_params = search.best_params_
     else:
         model = pipe.fit(X_train, y_train)
 
@@ -148,4 +151,5 @@ def train_sklearn(
         y_pred=np.array(y_pred),
         y_proba=y_proba if y_proba is None else np.array(y_proba),
         feature_names=feature_names,
+        best_params=best_params,
     )

@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 from typing import Any, Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import streamlit as st
 from sklearn.metrics import ConfusionMatrixDisplay, precision_recall_curve, roc_curve
 
-from tabular_ml_lab.lab.datasets import BUILTIN_DATASETS, load_builtin
+from tabular_ml_lab.lab.datasets import BUILTIN_DATASETS, load_builtin, load_openml
+from tabular_ml_lab.lab.experiments import export_active, save_run
 from tabular_ml_lab.lab.modeling import TrainResult, train_sklearn
 from tabular_ml_lab.lab.schema import infer_feature_types
 from tabular_ml_lab.lab.torch_trainer import TorchResult, train_and_eval_binary
 from tabular_ml_lab.lab.utils import parse_list, run_pandas_script
 
+
+BASE_DIR = Path(__file__).resolve().parents[1]
 
 st.set_page_config(page_title="Tabular ML Lab", layout="wide")
 
@@ -29,10 +34,16 @@ if "df" not in st.session_state:
     st.session_state.df = None
 if "target" not in st.session_state:
     st.session_state.target = None
+if "dataset_name" not in st.session_state:
+    st.session_state.dataset_name = None
+if "dataset_description" not in st.session_state:
+    st.session_state.dataset_description = None
 if "results" not in st.session_state:
     st.session_state.results = None
 if "task" not in st.session_state:
     st.session_state.task = None
+if "last_run" not in st.session_state:
+    st.session_state.last_run = None
 
 
 def _auto_task(target_series: pd.Series) -> str:
@@ -85,36 +96,75 @@ def _dataset_loaded() -> bool:
     return st.session_state.df is not None and st.session_state.target is not None
 
 
-tab_data, tab_transform, tab_model, tab_results = st.tabs(
-    ["Dataset", "Transform", "Model", "Results"]
+def _dataset_overview(df: pd.DataFrame):
+    missing = df.isna().mean().sort_values(ascending=False)
+    duplicates = df.duplicated().sum()
+    st.write("Rows", df.shape[0])
+    st.write("Columns", df.shape[1])
+    st.write("Duplicates", int(duplicates))
+    st.write("Missing (top 10)")
+    st.dataframe(missing.head(10))
+
+
+def _short_description(text: str | None) -> str:
+    if not text:
+        return ""
+    text = " ".join(text.split())
+    return text[:400] + ("..." if len(text) > 400 else "")
+
+
+(tab_data, tab_eda, tab_transform, tab_model, tab_results) = st.tabs(
+    ["Dataset", "EDA", "Transform", "Model", "Results"]
 )
 
 with tab_data:
     st.subheader("Select Data")
-    source = st.selectbox("Source", ["Built-in", "Upload CSV"])
+    source = st.selectbox("Source", ["Built-in", "OpenML", "Upload CSV"])
 
     df: pd.DataFrame | None = None
     target: str | None = None
+    dataset_name: str | None = None
+    dataset_description: str | None = None
 
     if source == "Built-in":
         dataset_name = st.selectbox("Dataset", list(BUILTIN_DATASETS.keys()))
         if st.button("Load dataset"):
-            df, target = load_builtin(dataset_name)
+            df, target, info = load_builtin(dataset_name)
+            dataset_name = info.get("name", dataset_name)
+            dataset_description = info.get("description")
+    elif source == "OpenML":
+        identifier = st.text_input("OpenML dataset id or name", "")
+        if st.button("Load OpenML"):
+            if identifier.strip():
+                with st.spinner("Downloading OpenML dataset..."):
+                    df, target, info = load_openml(identifier.strip())
+                    dataset_name = info.get("name", identifier)
+                    dataset_description = info.get("description")
+            else:
+                st.warning("Enter a dataset id or name.")
     else:
         uploaded = st.file_uploader("Upload CSV", type=["csv"])
         if uploaded is not None:
             df = pd.read_csv(uploaded)
+            dataset_name = "Uploaded CSV"
+            dataset_description = "User uploaded CSV file."
 
     if df is not None:
         st.session_state.df = df
         st.session_state.target = target
+        st.session_state.dataset_name = dataset_name
+        st.session_state.dataset_description = dataset_description
         st.success("Dataset loaded.")
 
     if st.session_state.df is not None:
+        if st.session_state.dataset_name:
+            st.write("Dataset", st.session_state.dataset_name)
+        if st.session_state.dataset_description:
+            st.write(_short_description(st.session_state.dataset_description))
+
         st.write("Preview")
         st.dataframe(st.session_state.df.head(20))
-
-        st.write("Shape", st.session_state.df.shape)
+        _dataset_overview(st.session_state.df)
 
         target = st.selectbox(
             "Target column",
@@ -124,6 +174,71 @@ with tab_data:
             else 0,
         )
         st.session_state.target = target
+
+with tab_eda:
+    st.subheader("EDA")
+
+    if not _dataset_loaded():
+        st.info("Load a dataset first.")
+    else:
+        df = st.session_state.df
+        target = st.session_state.target
+
+        st.write("Overview")
+        _dataset_overview(df)
+
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        categorical_cols = [c for c in df.columns if c not in numeric_cols]
+
+        st.write("Summary statistics")
+        if numeric_cols:
+            st.dataframe(df[numeric_cols].describe().transpose())
+
+        st.write("Categorical frequency (top 10)")
+        if categorical_cols:
+            cat_col = st.selectbox("Categorical column", categorical_cols)
+            st.dataframe(df[cat_col].value_counts().head(10))
+
+        st.write("Distributions")
+        if numeric_cols:
+            num_col = st.selectbox("Numeric column", numeric_cols)
+            bins = st.slider("Bins", min_value=5, max_value=80, value=30)
+            fig, ax = plt.subplots()
+            ax.hist(df[num_col].dropna(), bins=bins, color="#4C78A8", alpha=0.8)
+            ax.set_title(f"Distribution: {num_col}")
+            st.pyplot(fig)
+
+        if categorical_cols:
+            cat_dist_col = st.selectbox("Categorical distribution", categorical_cols, key="cat_dist")
+            top_n = st.slider("Top N categories", min_value=5, max_value=30, value=10)
+            counts = df[cat_dist_col].value_counts().head(top_n)
+            fig, ax = plt.subplots()
+            counts.plot(kind="bar", ax=ax, color="#F58518")
+            ax.set_title(f"Top {top_n}: {cat_dist_col}")
+            st.pyplot(fig)
+
+        st.write("Relationships")
+        if len(numeric_cols) >= 2:
+            x_col = st.selectbox("X", numeric_cols, key="x_col")
+            y_col = st.selectbox("Y", numeric_cols, key="y_col")
+            fig, ax = plt.subplots()
+            sns.scatterplot(data=df, x=x_col, y=y_col, hue=target if target in df.columns else None, ax=ax)
+            ax.set_title("Scatter")
+            st.pyplot(fig)
+
+            corr_cols = st.multiselect("Correlation columns", numeric_cols, default=numeric_cols[:6])
+            if len(corr_cols) >= 2:
+                fig, ax = plt.subplots()
+                sns.heatmap(df[corr_cols].corr(), cmap="coolwarm", ax=ax)
+                ax.set_title("Correlation Heatmap")
+                st.pyplot(fig)
+
+        st.write("Target distribution")
+        if target in df.columns:
+            fig, ax = plt.subplots()
+            df[target].value_counts().plot(kind="bar", ax=ax, color="#54A24B")
+            ax.set_title("Target distribution")
+            st.pyplot(fig)
 
 with tab_transform:
     st.subheader("Transform Data")
@@ -285,6 +400,20 @@ with tab_model:
 
         if st.button("Train"):
             with st.spinner("Training..."):
+                metadata = {
+                    "dataset": st.session_state.dataset_name or "dataset",
+                    "description": st.session_state.dataset_description or "",
+                    "target": target,
+                    "task": task,
+                    "model": model_name,
+                    "params": params,
+                    "grid": grid if use_grid else None,
+                    "rows": int(df.shape[0]),
+                    "columns": int(df.shape[1]),
+                    "numeric_features": numeric_features,
+                    "categorical_features": categorical_features,
+                }
+
                 if model_name == "PyTorch MLP":
                     result = train_and_eval_binary(
                         df,
@@ -295,8 +424,15 @@ with tab_model:
                         test_size=test_size,
                         scale_numeric=scale_numeric,
                     )
-                    st.session_state.results = result
-                    st.session_state.task = task
+                    metadata["model_type"] = "torch"
+                    run_dir, artifacts = save_run(
+                        BASE_DIR,
+                        metadata=metadata,
+                        metrics=result.metrics,
+                        model=result.checkpoint,
+                        model_type="torch",
+                        preprocessor=result.preprocessor,
+                    )
                 else:
                     result = train_sklearn(
                         df,
@@ -310,8 +446,26 @@ with tab_model:
                         test_size=test_size,
                         scale_numeric=scale_numeric,
                     )
-                    st.session_state.results = result
-                    st.session_state.task = task
+                    metadata["model_type"] = "sklearn"
+                    if result.best_params:
+                        metadata["best_params"] = result.best_params
+                    run_dir, artifacts = save_run(
+                        BASE_DIR,
+                        metadata=metadata,
+                        metrics=result.metrics,
+                        model=result.model,
+                        model_type="sklearn",
+                    )
+
+                export_active(
+                    BASE_DIR,
+                    metadata=metadata,
+                    artifacts=artifacts,
+                )
+
+                st.session_state.results = result
+                st.session_state.task = task
+                st.session_state.last_run = str(run_dir)
 
                 st.success("Training complete.")
 
@@ -324,6 +478,8 @@ with tab_results:
         results = st.session_state.results
         if isinstance(results, TrainResult):
             _render_metrics(results.metrics)
+            if results.best_params:
+                st.write("Best params", results.best_params)
             if st.session_state.task == "classification":
                 _plot_classification(results.y_true, results.y_pred, results.y_proba)
             else:
@@ -332,8 +488,19 @@ with tab_results:
             _render_metrics(results.metrics)
             _plot_classification(results.y_true, results.y_pred, results.y_proba)
 
+        if st.session_state.last_run:
+            st.write("Run saved to", st.session_state.last_run)
+            st.write("Active model exported to models/active")
+
         st.write("Download metrics")
         metrics_payload = results.metrics
         buffer = io.StringIO()
         pd.Series(metrics_payload).to_json(buffer)
         st.download_button("Download JSON", buffer.getvalue(), file_name="metrics.json")
+
+        st.write("API example")
+        sample = st.session_state.df.drop(columns=[st.session_state.target]).iloc[0].to_dict()
+        st.code(
+            "curl -X POST http://localhost:8000/predict \\\n  -H \"Content-Type: application/json\" \\\n  -d '" + str({"features": sample}).replace("'", "\"") + "'",
+            language="bash",
+        )
