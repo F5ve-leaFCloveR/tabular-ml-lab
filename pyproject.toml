@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tabular-ml-lab"
+version = "0.1.0"
+description = "End-to-end tabular ML pipeline with PyTorch, from data to API and dashboard."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Your Name" }]
+
+dependencies = [
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "scikit-learn>=1.3",
+  "torch>=2.2",
+  "pyyaml>=6.0",
+  "joblib>=1.3",
+  "matplotlib>=3.7",
+  "seaborn>=0.12",
+  "rich>=13.7",
+  "typer>=0.12",
+  "pydantic>=2.6",
+  "fastapi>=0.109",
+  "uvicorn>=0.27",
+  "streamlit>=1.32"
+]
+
+[project.urls]
+Homepage = "https://github.com/F5ve-leaFCloveR/tabular-ml-lab"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.black]
+line-length = 100
