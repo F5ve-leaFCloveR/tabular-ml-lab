@@ -3,8 +3,6 @@
 setup:
 	python -m pip install -r requirements.txt
 
-# Data
-
 data:
 	python scripts/download_data.py
 

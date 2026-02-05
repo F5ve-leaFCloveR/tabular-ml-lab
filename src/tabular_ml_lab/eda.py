@@ -21,7 +21,6 @@ def run_eda(cfg: Config) -> Path:
     summary = combined.describe(include="all").transpose()
     target_dist = combined[target_col].value_counts(normalize=True)
 
-    # Target distribution plot
     plt.figure()
     target_dist.plot(kind="bar", color=["#4C78A8", "#F58518"])
     plt.title("Target Distribution")
